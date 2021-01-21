@@ -1,52 +1,91 @@
 import Foundation
 
-
-struct Element<T: Hashable> {
-    private var dateDictionary = [T: Date]()
+struct ElementValue<ValueType: Hashable>: Hashable{
+    let value: ValueType
+    let timestamp: Date
     
-    func find(_ key: T) -> Date? {
-        return dateDictionary[key]
-    }
-    
-    mutating func add(_ item: T, with time: Date = Date()) {
-        if let previousAddTime = find(item), previousAddTime >= time {
-            return
-        }
-        dateDictionary[item] = time
+    init(value: ValueType, timestamp: Date = Date()) {
+        self.value = value
+        self.timestamp = timestamp
     }
 }
 
-struct ElementSet<T: Hashable> {
-    private var addSet = Element<T>()
-    private var removeSet = Element<T>()
+struct ElementDictionary<T, H> where T: Hashable, H: Hashable {
+    private var items: Dictionary<T,ElementValue<H>> = [:]
     
     func find(_ key: T) -> Date? {
-        guard let add = addSet.find(key) else { return nil }
-        guard let remove = removeSet.find(key) else { return add }
+        return items[key]?.timestamp
+    }
+    
+    mutating func add(key: T, value: H, with time: Date = Date()) {
+        items[key] = ElementValue<H>(value: value, timestamp: time)
+    }
+    
+    mutating func add(key: T, elementValue: ElementValue<H>) {
+        items[key] = elementValue
+    }
+    
+    mutating func remove(key: T, value: H, with time: Date = Date()) {
+        guard let item = items[key]  else { return }
+        if item.value == value && time == item.timestamp {
+            items[key] = nil
+        }
+    }
+    
+    mutating private func mergeItems(_ new: Dictionary<T,ElementValue<H>>) {
+        items = items.merging(new, uniquingKeysWith: {$0.timestamp > $1.timestamp ? $0 : $1})
+    }
+    
+    mutating func merge(_ new: ElementDictionary<T, H>) {
+        mergeItems(new.items)
+    }
+    
+    func find(key: T) -> ElementValue<H>? {
+        guard let item = items[key] else { return nil }
+        return item
+    }
+    
+    subscript(key: T) -> H? {
+        get {
+            guard let value = items[key] else { return nil }
+            return value.value
+        }
         
-        if (add > remove) {
-            return add
+        set(newValue) {
+            guard let newValue = newValue as? ElementValue<H> else { return }
+            items[key] = newValue
         }
-        return nil
-    }
-    
-    mutating func add(_ item: T, with time: Date = Date()) {
-        addSet.add(item, with: time)
-    }
-    
-    mutating func remove(_ item: T, with time: Date = Date()) {
-        guard find(item) != nil else { return }
-        removeSet.add(item, with: time)
     }
 }
 
-
-var testSet = ElementSet<Int>()
 let testTimes = (0...4).map { return Date(timeIntervalSinceNow: TimeInterval($0 * 60 * 60)) }
 
+
+var testInsertRemoveSet = ElementDictionary<Int,String>()
 for i in 0..<testTimes.count {
-    testSet.add(i, with: testTimes[i])
-    assert(testSet.find(i) == testTimes[i], "Item just added")
+    testInsertRemoveSet.add(key: i, value: "\(i)", with: testTimes[i])
+    assert(testInsertRemoveSet[i] == "\(i)", "Item just added")
 }
 
-assert(testSet.find(testTimes.count) == nil, "Item not found")
+assert(testInsertRemoveSet.find(testTimes.count) == nil, "Item not found")
+
+for i in 0..<testTimes.count {
+    testInsertRemoveSet.remove(key: i, value: "\(i)", with: testTimes[i])
+    assert(testInsertRemoveSet[i] == nil, "Item just removed")
+}
+
+
+var testMergeSet = ElementDictionary<String,Int>()
+var testMergeSet2 = ElementDictionary<String,Int>()
+
+testMergeSet.add(key: "1", value: 1, with: testTimes[1])
+testMergeSet2.add(key: "2", value: 2, with: testTimes[2])
+
+testMergeSet.merge(testMergeSet2)
+assert(testMergeSet["2"] == 2, "Items merged")
+assert(testMergeSet2["1"] != 1, "Items not merged")
+
+
+testMergeSet2.add(key: "1", value: 99, with: testTimes[2])
+testMergeSet.merge(testMergeSet2)
+assert(testMergeSet2["1"] == testMergeSet["1"], "Items merged and updated because its newer")
